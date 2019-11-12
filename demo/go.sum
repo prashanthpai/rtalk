@@ -1,0 +1,3 @@
+github.com/dgraph-io/ristretto v0.0.0-20191108194154-8d6a8a75b4ca h1:NgFAOh7RDM5WbdADm6VyLG1koLrzG0G24M/f5395PcI=
+github.com/dgraph-io/ristretto v0.0.0-20191108194154-8d6a8a75b4ca/go.mod h1:edzKIzGvqUCMzhTVWbiTSe75zD9Xxq0GtSBtFmaUTZs=
+github.com/dgryski/go-farm v0.0.0-20190423205320-6a90982ecee2/go.mod h1:SqUrOPUnsFjfmXRMNPybcSiG0BgUW2AuFH8PAnS2iTw=

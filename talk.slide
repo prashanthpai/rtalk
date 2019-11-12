@@ -1,0 +1,246 @@
+# 1
+Ristretto
+@Dgraph
+
+
+Prashanth Pai
+Gopher
+
+mail@ppai.me
+
+# 2
+* Caching: Why?
+
+.image images/mem.png _ 650
+
+: RAMs are getting cheaper. But not all data can be kept in RAM.
+: 90% of all data has been in generated in last 2 to 3 years.
+: If data is in RAM, it'll be served faster.
+: RAM latencies are 100 ns. Disk seeks 10 ms, latency 5ms.
+: First request to Postgres is slow.
+
+# 3
+* Cache access patterns: Zipf's Law
+
+Most frequently accessed keys are accessed exponentially more times than others.
+
+.image images/word_freq.png _ 500
+
+Most frequently occurring word (Brown Corpus):
+
+   the     7%
+   of      3.5%
+   and     2%
+
+: The frequency of any word is inversely proportional to its rank in the frequency table. Thus the most frequent word will occur approximately twice as often as the second most frequent word, three times as often as the third most frequent word, etc.
+: Zipf examples: webpages (ranked by traffic), movies, salaries, city population, frequency of proteins in a genome sequence, number of Twitter followers for NBA teams.
+: It can be generalized as follows:
+: – a few elements have a really high frequency (left tail)
+: – a medium number of elements have a medium frequency (middle part of diagram)
+: – a huge number of elements have very low frequency (right tail)
+: A small number of very popular items (50% of the weight; the other 50 is long heavy tail)
+: It also applied to things like city populations, as the most populous city would be twice as big as the second largest city
+: Microsoft said that (Roughly) 80% of errors come from 20% of bugs.
+: We're beginning to realize the mathematical patterns of the Matrix.
+
+# 4
+* Caching in Go
+
+    map[string]interface{}
+
+Goroutine safe version:
+
+.code code/safeCache.go
+
+: RWMutex can be held by an arbitrary number of readers or a single writer
+: To RLock(), each thread needs to update reader count
+: when each core updates the count, it invalidates cache entries on all other cores
+: O(N) for RLock() and RUnlock() on N cores
+: 40ns latency for transfer of L2 cache line between CPUs
+
+# 5
+* sync.Map
+
+- Added to solve cache contention in standard lib
+- Like `map[interface{}]interface{}`
+- Goroutine safe.
+
+*Optimized* *for*:
+
+- key written once but read many times, as in caches that only grow
+- when multiple goroutines read, write, and overwrite disjoint sets of keys
+
+*But..*
+
+- slower than sync.RWMutex for single core access.
+- not type safe.
+- no len()
+- does not reduce in size, despite deleting elements
+
+: optimised for keys that are accessed repeatedly over time
+: Added in go 1.9 by Bryan C Mills
+: not useful if not highly concurrent or there are many cores
+: used internally in reflect and encoding/json+xml package
+
+# 6
+
+* Cache contention: sync.Map vs map+sync.RWMutex
+
+.image images/syncMap.png _ 800
+
+: Cache can slow you down (it shouldn't)
+
+# 7
+
+* Cache and application interaction
+
+- Hit ratio
+- Eviction policies: LRU, LFU
+- Coherence (Write-through vs Write-back)
+- Invalidation
+- Eviction > Admission
+- Cache warmups
+
+There's no such thing as a simple cache bug - Rob Pike.
+
+: Doesn't matter if everything can be stored in RAM.
+: Caching in distributed filesystems are hard.
+: Caching in DB or MVCC is hard; no query caching; only data caching
+: redis/memcached
+: Eviction policies internally use priority queue or a minheap
+: Cache should not serve stale data.
+
+# 8
+
+* Ristretto
+
+Ristretto is a fast, fixed size, in-memory cache with a dual focus on throughput and hit ratio performance.
+
+- *Not* a server.
+- *Not* distributed.
+- *Not* a key-value store.
+
+.image images/morning-coffee-3x.gif
+
+.link github.com/dgraph-io/ristretto
+
+: influenced by Java's caffeine
+: redis/memcached
+: just like any other Go library that you can import into your project and use in a single process
+: Can be made distributed or networked server. But what's the point when there's redis ?
+: code is clean and maintainable and open source
+
+* Ristretto: Features
+
+- Simple API
+- Highly Concurrent
+- Fast Throughput
+- High Hit Ratios
+- Cost-Based Eviction
+- Metrics
+
+: (simple API) just figure out your ideal Config values and you're off and running
+: (concurrent) can use as many goroutines as you want with little throughput degradation; scales linearly with number of cores
+: (throughput) we use a variety of techniques for managing contention and the result is excellent throughput
+: (throughput) performance can be attributed to a mix of batching and eventual consistency
+: (high hit ratios) Unique admission/eviction policy pairing
+: cache should deteriorate in hit ratios but not throughput or latency
+: any large new item deemed valuable can evict multiple smaller items (cost could be anything)
+: (metrics) optional metrics hit ratios, and other stats (10% throughput performance overhead)
+
+# 9
+* Using ristretto
+
+.code code/usage1.go /START OMIT/,/END OMIT/
+
+*NumCounters*
+
+- number of counters (keys) to keep that hold access frequency information
+- setting this to 10x the number of items you expect in full cache
+- each counter takes up 4 bits i.e 10M counters 5 MB
+
+*MaxCost*
+
+- drives how eviction decisions are made
+- can be used to denote the max size in bytes
+- must match with cost values passed to Set()
+
+: Users can specify what that cost is when calling Set
+: We count this cost against the MaxCost of the cache
+: When the cache is operating at capacity, a heavy item could displace many lightweight items
+
+# 11
+* Ristretto APIs
+
+    func (c *Cache) Get(key interface{}) (interface{}, bool)
+
+Get returns value and a boolean representing whether the value was found or not.
+
+    func (c *Cache) Set(key, value interface{}, cost int64) bool
+
+Set attempts to add the key-value item to the cache. If it returns false, then the Set was dropped and the key-value item isn't added to the cache.
+
+    func (c *Cache) Del(key interface{})
+
+Del deletes the key-value item from the cache if it exists.
+
+: the only thing Ristretto does that could be construed as one is dropping some Set calls
+: That means a Set call for a new item (updates are guaranteed) isn't guaranteed to make it into the cache
+: Get(): naive way is count++ for frequency
+: In our LFU based cache, we need to increment an item’s hit counter
+: Internally use sync.Pool and channel to update hit counter
+: Rather than acquiring a mutex lock for every metadata mutation, we wait for a ring buffer to fill up before we acquire a mutex and process the mutations
+
+# 12
+
+*  Ristretto: Set()
+
+.image images/set.png _ 750
+
+Updates/Overwrites are guaranteed to make it to cache.
+
+: Set()
+: we use a channel to capture the Sets, dropping them on the floor if the channel is full to avoid contention
+: background goroutines pick sets from the channel and process the Set (async)
+: even when Set() is applied, it follows eventual consistency
+: The new item could be dropped at two points: when passing through the Set buffer or when passing through the admission policy
+: be very judicious in what keys are let in to acheive high hit ratios
+: evaluate the value of incoming key against eviction candidates
+: dropped by the policy if its determined that the key-value item isn't worth keeping (How likely is this key going to appear again)
+: item will be added and other items will be evicted in order to make room
+: Lossy: doesn't affect hit ratios much at all as we expect the most popular items to be Set multiple times and eventually make it in the cache
+: If however, a key is already present in the cache, Set would update the key immediately. This is to avoid a cached key holding a stale value.
+
+# 12
+
+* Ristretto: Callbacks and Customisation
+
+    OnEvict func(key uint64, value interface{}, cost int64)
+
+OnEvict is called for every eviction performed.
+
+    Cost func(value interface{}) int64
+
+Cost evaluates a value and outputs a corresponding cost.
+
+    KeyToHash func(key interface{}, seed uint8) uint64
+
+KeyToHash function is used to customize the key hashing algorithm.
+Each key will be hashed using the provided function.
+
+: Ristretto does not store keys internally
+: Default hashing used in Go runtime's memhash (5ns)
+
+# 13
+* Demo
+
+.image images/rocket.svg 550 _
+
+# Like them gopher images ?
+# Thanks to: https://github.com/egonelbre/gophers
+
+# Resources/References used for the talk
+# All about caching (podcast): https://www.youtube.com/watch?v=pjV0Nfcle9A
+# Ristretto talk: https://www.youtube.com/watch?v=HzMZEsqXDec
+# https://github.com/dgraph-io/ristretto
+# https://godoc.org/github.com/dgraph-io/ristretto
