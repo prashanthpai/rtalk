@@ -13,8 +13,8 @@ mail@ppai.me
 
 .image images/mem.png _ 650
 
-: RAMs are getting cheaper. But not all data can be kept in RAM.
 : 90% of all data has been in generated in last 2 to 3 years.
+: RAMs are getting cheaper. But not all data can be kept in RAM.
 : If data is in RAM, it'll be served faster.
 : RAM latencies are 100 ns. Disk seeks 10 ms, latency 5ms.
 : First request to Postgres is slow.
@@ -38,10 +38,8 @@ Most frequently occurring word (Brown Corpus):
 : – a few elements have a really high frequency (left tail)
 : – a medium number of elements have a medium frequency (middle part of diagram)
 : – a huge number of elements have very low frequency (right tail)
-: A small number of very popular items (50% of the weight; the other 50 is long heavy tail)
 : It also applied to things like city populations, as the most populous city would be twice as big as the second largest city
 : Microsoft said that (Roughly) 80% of errors come from 20% of bugs.
-: We're beginning to realize the mathematical patterns of the Matrix.
 
 # 4
 * Caching in Go
@@ -94,6 +92,8 @@ Goroutine safe version:
 
 * Cache and application interaction
 
+There's no such thing as a simple cache bug - Rob Pike.
+
 - Hit ratio
 - Eviction policies: LRU, LFU
 - Coherence (Write-through vs Write-back)
@@ -101,14 +101,12 @@ Goroutine safe version:
 - Eviction > Admission
 - Cache warmups
 
-There's no such thing as a simple cache bug - Rob Pike.
-
-: Doesn't matter if everything can be stored in RAM.
-: Caching in distributed filesystems are hard.
+: Hit ratio doesn't matter if everything can be stored in RAM
+: Caching in distributed filesystems are hard
 : Caching in DB or MVCC is hard; no query caching; only data caching
 : redis/memcached
 : Eviction policies internally use priority queue or a minheap
-: Cache should not serve stale data.
+: Cache should not serve stale data
 
 # 8
 
