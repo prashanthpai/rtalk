@@ -13,9 +13,8 @@ mail@ppai.me
 
 .image images/mem.png _ 650
 
-: 90% of all data has been in generated in last 2 to 3 years.
-: RAMs are getting cheaper. But not all data can be kept in RAM.
-: If data is in RAM, it'll be served faster.
+: 90% of all data has been in generated in last 2 to 3 years; mostly end up in persistence storage (slow)
+: If data is in RAM, it'll be served faster. RAMs are getting cheaper. But not all data can be kept in RAM
 : RAM latencies are 100 ns. Disk seeks 10 ms, latency 5ms.
 : First request to Postgres is slow.
 
@@ -34,12 +33,8 @@ Most frequently occurring word (Brown Corpus):
 
 : The frequency of any word is inversely proportional to its rank in the frequency table. Thus the most frequent word will occur approximately twice as often as the second most frequent word, three times as often as the third most frequent word, etc.
 : Zipf examples: webpages (ranked by traffic), movies, salaries, city population, frequency of proteins in a genome sequence, number of Twitter followers for NBA teams.
-: It can be generalized as follows:
-: – a few elements have a really high frequency (left tail)
-: – a medium number of elements have a medium frequency (middle part of diagram)
-: – a huge number of elements have very low frequency (right tail)
-: It also applied to things like city populations, as the most populous city would be twice as big as the second largest city
-: Microsoft said that (Roughly) 80% of errors come from 20% of bugs.
+: a few elements have a really high frequency (left tail), a medium number of elements have a medium frequency (middle part of diagram), a huge number of elements have very low frequency (right tail)
+: Microsoft said that (Roughly) 80% of errors come from 20% of bugs (paretto principal)
 
 # 4
 * Caching in Go
@@ -50,10 +45,10 @@ Goroutine safe version:
 
 .code code/safeCache.go
 
-: RWMutex can be held by an arbitrary number of readers or a single writer
-: To RLock(), each thread needs to update reader count
-: when each core updates the count, it invalidates cache entries on all other cores
-: O(N) for RLock() and RUnlock() on N cores
+: RWMutex can be held by an arbitrary number of readers or a single writer.
+: To RLock(), each thread needs to update reader count.
+: When each core updates the count, it invalidates cache entries on all other cores.
+: O(N) for RLock() and RUnlock() on N cores.
 : 40ns latency for transfer of L2 cache line between CPUs
 
 # 5
@@ -75,8 +70,9 @@ Goroutine safe version:
 - no len()
 - does not reduce in size, despite deleting elements
 
+: Added in go 1.9 by
 : optimised for keys that are accessed repeatedly over time
-: Added in go 1.9 by Bryan C Mills
+: sync.Map performs well for read-heavy workloads but deteriorates for write workloads
 : not useful if not highly concurrent or there are many cores
 : used internally in reflect and encoding/json+xml package
 
@@ -153,7 +149,7 @@ Ristretto is a fast, fixed size, in-memory cache with a dual focus on throughput
 
 *NumCounters*
 
-- number of counters (keys) to keep that hold access frequency information
+- number of counters (keys) to hold access frequency information
 - setting this to 10x the number of items you expect in full cache
 - each counter takes up 4 bits i.e 10M counters 5 MB
 
@@ -166,6 +162,8 @@ Ristretto is a fast, fixed size, in-memory cache with a dual focus on throughput
 : Users can specify what that cost is when calling Set
 : We count this cost against the MaxCost of the cache
 : When the cache is operating at capacity, a heavy item could displace many lightweight items
+
+
 
 # 11
 * Ristretto APIs
@@ -198,6 +196,8 @@ Del deletes the key-value item from the cache if it exists.
 Updates/Overwrites are guaranteed to make it to cache.
 
 : Set()
+: As long as you're not trying to Set with multiple goroutines running in parallel no Sets should be dropped.
+: Another way to do this is to set an infinitely high MaxCost, and set the cost of each key to zero or 1. If the cache never reaches capacity, there's no reason for eviction.
 : we use a channel to capture the Sets, dropping them on the floor if the channel is full to avoid contention
 : background goroutines pick sets from the channel and process the Set (async)
 : even when Set() is applied, it follows eventual consistency
@@ -227,7 +227,7 @@ KeyToHash function is used to customize the key hashing algorithm.
 Each key will be hashed using the provided function.
 
 : Ristretto does not store keys internally
-: Default hashing used in Go runtime's memhash (5ns)
+: Default hashing used in Go runtime's memhash (10ns)
 
 # 13
 * Demo
