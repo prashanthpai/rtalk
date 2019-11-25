@@ -28,7 +28,7 @@ func main() {
 	}
 	defer cache.Close()
 
-	// Store 4 keys, each of size 1KB
+	// Store 4 keys, each of size 256KB
 	for i := 0; i < 4; i++ {
 		b, err := getRandom(256 * KB)
 		if err != nil {

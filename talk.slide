@@ -13,10 +13,10 @@ mail@ppai.me
 
 .image images/mem.png _ 650
 
-: 90% of all data has been in generated in last 2 to 3 years; mostly end up in persistence storage (slow)
-: If data is in RAM, it'll be served faster. RAMs are getting cheaper. But not all data can be kept in RAM
-: RAM latencies are 100 ns. Disk seeks 10 ms, latency 5ms.
-: First request to Postgres is slow.
+: 90% of all data has been in generated in last 2 to 3 years; they mostly end up in persistence storage (slow)
+: If data is in RAM, it'll be served faster. Although, RAMs are getting cheaper. Not all data can be kept in RAM.
+: RAM latencies are 100 ns. Disk latencies are 5 to 10ms.
+: You may have seen that the first request to Postgres is slow. Subsequent requests are fast.
 
 # 3
 * Cache access patterns: Zipf's Law
@@ -31,10 +31,9 @@ Most frequently occurring word (Brown Corpus):
    of      3.5%
    and     2%
 
-: The frequency of any word is inversely proportional to its rank in the frequency table. Thus the most frequent word will occur approximately twice as often as the second most frequent word, three times as often as the third most frequent word, etc.
-: Zipf examples: webpages (ranked by traffic), movies, salaries, city population, frequency of proteins in a genome sequence, number of Twitter followers for NBA teams.
-: a few elements have a really high frequency (left tail), a medium number of elements have a medium frequency (middle part of diagram), a huge number of elements have very low frequency (right tail)
-: Microsoft said that (Roughly) 80% of errors come from 20% of bugs (paretto principal)
+: The most frequent word will occur approximately twice as often as the second most frequent word, three times as often as the third most frequent word, etc.
+: A few elements have a really high frequency (left tail), a medium number of elements have a medium frequency (middle part of diagram), a huge number of elements have very low frequency (right tail)
+: Zipf examples: webpages (ranked by traffic), city population, frequency of proteins in a genome sequence, number of Twitter followers for NBA teams.
 
 # 4
 * Caching in Go
@@ -45,11 +44,12 @@ Goroutine safe version:
 
 .code code/safeCache.go
 
-: RWMutex can be held by an arbitrary number of readers or a single writer.
+: RWMutex can be held by any large number of readers or a single writer.
 : To RLock(), each thread needs to update reader count.
 : When each core updates the count, it invalidates cache entries on all other cores.
 : O(N) for RLock() and RUnlock() on N cores.
-: 40ns latency for transfer of L2 cache line between CPUs
+: 40ns latency for transfer of L2 cache line between CPUs.
+: Non-trivial amount of lock contention overhead as number of CPUs scale.
 
 # 5
 * sync.Map
@@ -70,11 +70,11 @@ Goroutine safe version:
 - no len()
 - does not reduce in size, despite deleting elements
 
-: Added in go 1.9 by
+: Added in go 1.9
+: used internally in reflect and encoding/json+xml package
 : optimised for keys that are accessed repeatedly over time
 : sync.Map performs well for read-heavy workloads but deteriorates for write workloads
-: not useful if not highly concurrent or there are many cores
-: used internally in reflect and encoding/json+xml package
+: not useful if not highly concurrent or there are many cores; might be slower
 
 # 6
 
@@ -86,7 +86,7 @@ Goroutine safe version:
 
 # 7
 
-* Cache and application interaction
+* Cache (memory bounded) and application interaction
 
 There's no such thing as a simple cache bug - Rob Pike.
 
@@ -97,11 +97,11 @@ There's no such thing as a simple cache bug - Rob Pike.
 - Eviction > Admission
 - Cache warmups
 
-: Hit ratio doesn't matter if everything can be stored in RAM
-: Caching in distributed filesystems are hard
-: Caching in DB or MVCC is hard; no query caching; only data caching
+: Hit ratio doesn't matter if everything can be stored in RAM.
+: Caching in distributed filesystems are hard.
+: Caching in DB or MVCC is hard; no query caching; only data caching.
 : redis/memcached
-: Eviction policies internally use priority queue or a minheap
+: Eviction policies internally use priority queue or a minheap or a DLL.
 : Cache should not serve stale data
 
 # 8
@@ -118,9 +118,9 @@ Ristretto is a fast, fixed size, in-memory cache with a dual focus on throughput
 
 .link github.com/dgraph-io/ristretto
 
-: influenced by Java's caffeine
-: redis/memcached
 : just like any other Go library that you can import into your project and use in a single process
+: is heavily influenced by Java's caffeine
+: unlke redis/memcached
 : Can be made distributed or networked server. But what's the point when there's redis ?
 : code is clean and maintainable and open source
 
@@ -135,7 +135,7 @@ Ristretto is a fast, fixed size, in-memory cache with a dual focus on throughput
 
 : (simple API) just figure out your ideal Config values and you're off and running
 : (concurrent) can use as many goroutines as you want with little throughput degradation; scales linearly with number of cores
-: (throughput) we use a variety of techniques for managing contention and the result is excellent throughput
+: (throughput) uses a variety of techniques for managing contention and the result is excellent throughput
 : (throughput) performance can be attributed to a mix of batching and eventual consistency
 : (high hit ratios) Unique admission/eviction policy pairing
 : cache should deteriorate in hit ratios but not throughput or latency
@@ -159,11 +159,13 @@ Ristretto is a fast, fixed size, in-memory cache with a dual focus on throughput
 - can be used to denote the max size in bytes
 - must match with cost values passed to Set()
 
+: NumCounters is the number of 4-bit access counters to keep for admission and eviction
+: For example, if MaxCost is 100 and a new item with a cost of 1 increases total cache cost to 101, 1 item will be evicted
 : Users can specify what that cost is when calling Set
 : We count this cost against the MaxCost of the cache
 : When the cache is operating at capacity, a heavy item could displace many lightweight items
-
-
+: Set(): Ristretto does not store keys internally
+: TURN OFF EVICTION: set an infinitely high MaxCost, and set the cost of each key to zero or 1. If the cache never reaches capacity, there's no reason for eviction.
 
 # 11
 * Ristretto APIs
@@ -180,12 +182,11 @@ Set attempts to add the key-value item to the cache. If it returns false, then t
 
 Del deletes the key-value item from the cache if it exists.
 
-: the only thing Ristretto does that could be construed as one is dropping some Set calls
-: That means a Set call for a new item (updates are guaranteed) isn't guaranteed to make it into the cache
-: Get(): naive way is count++ for frequency
-: In our LFU based cache, we need to increment an item’s hit counter
-: Internally use sync.Pool and channel to update hit counter
-: Rather than acquiring a mutex lock for every metadata mutation, we wait for a ring buffer to fill up before we acquire a mutex and process the mutations
+: Get(): distinguish case of key not existing and being nil.
+: Get(): naive way is count++ for frequency; LFU based cache, we need to increment an item’s hit counter.
+: Set() call for a new item (updates are guaranteed) isn't guaranteed to make it into the cache.
+: Internally use sync.Pool and channel to update hit counter.
+: Rather than acquiring a mutex lock for every metadata mutation, we wait for a ring buffer to fill up before we acquire a mutex and process the mutations.
 
 # 12
 
@@ -195,21 +196,17 @@ Del deletes the key-value item from the cache if it exists.
 
 Updates/Overwrites are guaranteed to make it to cache.
 
-: Set()
-: As long as you're not trying to Set with multiple goroutines running in parallel no Sets should be dropped.
-: Another way to do this is to set an infinitely high MaxCost, and set the cost of each key to zero or 1. If the cache never reaches capacity, there's no reason for eviction.
-: we use a channel to capture the Sets, dropping them on the floor if the channel is full to avoid contention
-: background goroutines pick sets from the channel and process the Set (async)
-: even when Set() is applied, it follows eventual consistency
-: The new item could be dropped at two points: when passing through the Set buffer or when passing through the admission policy
-: be very judicious in what keys are let in to acheive high hit ratios
-: evaluate the value of incoming key against eviction candidates
-: dropped by the policy if its determined that the key-value item isn't worth keeping (How likely is this key going to appear again)
-: item will be added and other items will be evicted in order to make room
-: Lossy: doesn't affect hit ratios much at all as we expect the most popular items to be Set multiple times and eventually make it in the cache
-: If however, a key is already present in the cache, Set would update the key immediately. This is to avoid a cached key holding a stale value.
+: SET: The new item could be dropped at two points: when passing through the Set buffer or when passing through the admission policy.
+: SET: As long as you're not trying to Set with multiple goroutines running in parallel no Sets should be dropped.
+: ADMISSION: dropped by the policy if its determined that the key-value item isn't worth keeping (How likely is this key going to appear again).
+: ADMISSION: be very judicious in what keys are let in to acheive high hit ratios.
+: ADMISSION: evaluate the value of incoming key against eviction candidates, item will be added and other items will be evicted in order to make room.
+: LOSSY: doesn't affect hit ratios much at all as we expect the most popular items to be Set multiple times and eventually make it in the cache.
+: UPDATE: If however, a key is already present in the cache, Set would update the key immediately. This is to avoid a cached key holding a stale value.
+: INTERNAL: we use a channel to capture the Sets, dropping them on the floor if the channel is full to avoid contention.
+: INTERNAL: background goroutines pick sets from the channel and process the Set (async).
 
-# 12
+# 13
 
 * Ristretto: Callbacks and Customisation
 
